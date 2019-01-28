@@ -1,0 +1,94 @@
+---
+title: "Veg_Transect_Indicators"
+author: "Amy Thorson"
+date: "1/18/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+#Read in csv files: 
+
+IDspecies.list<-read.csv("/Users/amythor86/Desktop/MastersCollection/Taylor2017/Idaho_SpeciesList_forDIMAImport_1010.csv")
+
+primary.table<-read.csv("/Users/amythor86/Desktop/MastersCollection/Taylor2017/TAYLOR_TIDYDATA_2019_0110.csv")
+
+plot.slope<-read.csv("/Users/amythor86/Desktop/MastersCollection/Taylor2017/Plot.Slope.csv")
+
+#Join plot.slope to primary.table
+full.table<-left_join(primary.table, plot.slope, by = "Plot_ID")
+
+#filter full.table to only desired columns
+table.restricted<-dplyr::select(.data=full.table, Date, Elevation, Slope, Plot_ID, Line, Position, dplyr::starts_with("Hit", ignore.case = TRUE))
+
+#make table.restricted tall
+lpi.hits.tall <- tidyr::gather(data = dplyr::select(.data = table.restricted, Date, Elevation, Slope, Plot_ID, Line, Position, dplyr::starts_with("Hit", ignore.case = TRUE)), key = "layer", value = "code", -(Date:Position))
+
+#join table.restricted to IDspecies list 
+full.table<-left_join(lpi.hits.tall, IDspecies.list, by = "SpeciesCode")
+
+
+##Percent cover code 
+pct.cover <- function(full.table,
+                      tall = FALSE,
+                      layer = "any")
+{grouping.variables <- c("Duration", "GrowthHabitCode", "SpeciesCode", "Stabilizing", "Invasive")
+level <- ("Plot_ID")
+
+# Drop data where there is no code value (i.e. layers where there was no recorded hit)
+  full.table <- dplyr::filter(.data = full.table,
+                            !is.na(SpeciesCode),
+                            SpeciesCode != "",
+                            SpeciesCode != "None")
+  
+# Within a plot, we need the number of pin drops
+  point.totals <- (100)
+  
+# Add the point.counts field (it'll be the same for every record associated with a plot)
+full.table <- merge(x = full.table,
+                    y = point.totals,
+                    all.x = TRUE) 
+  
+summary <- full.table %>% dplyr::group_by("Date", "Elevation", "Slope", "Plot_ID", "Line", "point.totals", !!!grouping.variables) %>%
+                        
+## Here's the breakdown of the gnarly parts:
+# Because this is a tall format, we want just presence/absence for the grouping at a given point
+# so we'll write in 1 if any of the layers within that grouping has a non-NA and non-"" value
+                          dplyr::summarize(present = if(any(!is.na(SpeciesCode) & SpeciesCode != "")){1} else {0}) %>%
+                          tidyr::unite(indicator, !!!grouping.variables, sep = ".") %>%
+                          dplyr::ungroup() %>% dplyr::group_by(!!!level, indicator) %>%
+                          
+# Within a plot, find the sum of all the "presents" then divide by the number of possible hits, which
+# we added in point.count
+                          dplyr::summarize(percent = 100*sum(present, na.rm = TRUE)/(point.totals)) %>%
+## Remove the empty groupings—that is the ones where all the indicator variable values were NA
+                          dplyr::filter(!grepl(indicator, pattern = "^[NA.]{0,100}NA$"))
+                      
+  return(summary)}
+
+
+
+
+
